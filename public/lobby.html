@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Лобби</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Стили для игрового поля */
+        body {
+            font-family: sans-serif;
+        }
+
+        #gameContainer {
+            display: none; /* Скрываем игровое поле до начала игры */
+            background-color: green;
+            width: 100%;
+            height: 100vh;
+            position: relative;
+            overflow: hidden; /* Предотвращает появление полос прокрутки */
+        }
+
+        /* Стили для игроков */
+        .playerArea {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: white;
+        }
+
+        /* Стили для колоды и сброса */
+        #deckPile, #discardPile {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 60px;
+            height: 84px;
+            border: 1px solid black;
+            background-color: lightgray;
+        }
+
+        #deckPile {
+            left: 20%;
+        }
+
+        #discardPile {
+            right: 20%;
+        }
+
+        /* Стили для чата */
+        #chat {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 300px;
+            overflow-y: auto;
+            background-color: white;
+            border: 1px solid black;
+        }
+
+        #chatLog {
+            height: 90%;
+            overflow-y: auto;
+        }
+
+        #messageInput {
+            width: 100%;
+        }
+
+        /* Стили для карт */
+        .card {
+            width: 60px; /* Ширина карты */
+            height: 84px; /* Высота карты */
+            border: 1px solid black;
+            margin: 2px;
+            display: inline-block;
+            background-color: white; /* Фон карты, если изображение не загружается */
+            background-size: cover; /* Обеспечивает, что изображение заполняет элемент */
+            position: relative;
+            text-align: center;
+            line-height: 84px; /* Центрируем текст по вертикали */
+        }
+    </style>
+</head>
+<body>
+    <div id="dashboard">
+        <h1>Личный кабинет: <span id="username"></span></h1>
+        <button id="logoutButton">Выход</button>
+        <div id="profile">
+            <img id="avatar" src="uploads/default-avatar.png" alt="Аватар" width="100" height="100"> <!-- Аватарка -->
+            <div id="stats">
+                <p>Количество игр: <span id="gamesPlayed">0</span></p>
+                <p>Количество побед: <span id="gamesWon">0</span></p>
+            </div>
+        </div>
+        <button id="settingsButton">Настройки</button>
+        <button id="rulesButton">Правила</button>
+        <h2>Игроки в лобби:</h2>
+        <ul id="playerList"></ul>
+        <button id="startGameButton" style="display: none;">Начать игру</button>
+    </div>
+
+    <div id="settings" style="display: none;">
+        <h2>Настройки</h2>
+        <label for="avatarInput">Сменить аватарку:</label>
+        <input type="file" id="avatarInput" accept="image/*">
+        <button id="changeAvatarButton">Сменить аватарку</button>
+        <button id="backButton">Назад</button>
+        <div id="message" style="color: green;"></div> <!-- Сообщение об изменениях -->
+    </div>
+
+    <div id="gameContainer">
+        <div id="playerHand"></div>
+        <div id="deckPile" class="card-back">Колода</div>
+        <div id="discardPile" class="card-back">Сброс</div>
+
+        <div id="chat">
+            <div id="chatLog"></div>
+            <input type="text" id="messageInput" placeholder="Введите сообщение...">
+            <button id="sendButton">Отправить</button>
+        </div>
+
+        <div id="actionButtons">
+            <button id="drawCardButton">Взять карту</button>
+            <button id="layDownButton">Подложить</button>
+            <button id="discardButton">Сбросить карту</button>
+            <button id="makeLaydownButton">Сделать выкладку</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        const getAvatar = () => {
+            const localStorageValue = localStorage.getItem('avatar');
+
+            if (!localStorageValue || localStorageValue == 'null') {
+                const avatar = 'uploads/default-avatar.png';
+                localStorage.setItem('avatar', avatar); // Сохраняем аватарку
+                return avatar;
+            } else {
+                return localStorageValue
+            }
+        } 
+
+        // Получаем имя пользователя и аватарку из локального хранилища
+        const username = localStorage.getItem('username') || 'Игрок';
+        const avatar = getAvatar();
+
+        document.getElementById('username').textContent = username;
+        document.getElementById('avatar').src = avatar; // Устанавливаем аватарку
+
+        // Отправляем имя игрока на сервер
+        socket.emit('addPlayer', { name: username, avatar: avatar });
+
+        // Обработка выхода из аккаунта
+        document.getElementById('logoutButton').addEventListener('click', () => {
+            socket.emit('logout');
+            localStorage.removeItem('username'); // Удаляем имя пользователя из локального хранилища
+            window.location.href = '/'; // Перенаправляем на страницу входа
+        });
+
+        // Обновление списка игроков
+        socket.on('updateLobby', (players) => {
+            const playerListElement = document.getElementById('playerList');
+            playerListElement.innerHTML = ''; // Очищаем список
+
+            players.forEach((player, index) => {
+                const listItem = document.createElement('li');
+                listItem.textContent = `${index + 1}. ${player.name}`; // Исправлено отображение
+                playerListElement.appendChild(listItem);
+            });
+
+            // Показываем кнопку "Начать игру", если игроков 2 или больше
+            document.getElementById('startGameButton').style.display = players.length >= 2 ? 'block' : 'none';
+        });
+
+        // Начать игру
+        document.getElementById('startGameButton').addEventListener('click', () => {
+            socket.emit('startGame'); // Отправляем событие на сервер
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'block'; // Показываем игровое поле
+        });
+
+        // Обработка получения карт
+        socket.on('dealCards', (hand) => {
+            displayCards(hand);
+        });
+
+        // Отображение карт
+        function displayCards(cards) {
+            const playerHand = document.getElementById('playerHand');
+            playerHand.innerHTML = ''; // Очищаем руку игрока
+
+            cards.forEach((card, index) => {
+                const cardElement = document.createElement('div');
+                cardElement.className = 'card';
+                cardElement.dataset.index = index; // Сохраняем индекс карты
+                cardElement.style.backgroundImage = `url('cards/${getCardName(card)}.png')`; // Устанавливаем изображение карты
+                cardElement.draggable = true; // Делаем карту перетаскиваемой
+
+                // Если изображение не загружается, показываем текст
+                // cardElement.textContent = `${card.rank} ${card.suit}`;
+
+                // Обработчик перетаскивания
+                cardElement.addEventListener('dragstart', (event) => {
+                    event.dataTransfer.setData('text/plain', index);
+                });
+
+                playerHand.appendChild(cardElement);
+            });
+        }
+
+        // Получение имени файла карты
+        function getCardName(card) {
+            console.log(card);
+            const suitMap = {
+                'hearts': 'H',
+                'diamonds': 'D',
+                'clubs': 'C',
+                'spades': 'S',
+                'red': 1,
+                'black': 2,
+            };
+            return `${card.rank}${suitMap[card.suit]}`;
+        }
+
+        // Отправка сообщений чата
+        document.getElementById('sendButton').addEventListener('click', () => {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value;
+            socket.emit('chatMessage', message);
+            messageInput.value = '';
+        });
+
+        // Получение сообщений чата
+        socket.on('chatMessage', (message) => {
+            const chatLog = document.getElementById('chatLog');
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            chatLog.appendChild(messageElement);
+            chatLog.scrollTop = chatLog.scrollHeight; // Прокручиваем к последнему сообщению
+        });
+
+        // Обработка кнопок действий
+        document.getElementById('drawCardButton').addEventListener('click', () => {
+            socket.emit('drawCard'); // Отправляем событие на сервер
+        });
+
+        document.getElementById('layDownButton').addEventListener('click', () => {
+            socket.emit('layDown'); // Отправляем событие на сервер
+        });
+
+        document.getElementById('discardButton').addEventListener('click', () => {
+            socket.emit('discardCard'); // Отправляем событие на сервер
+        });
+
+        document.getElementById('makeLaydownButton').addEventListener('click', () => {
+            socket.emit('makeLaydown'); // Отправляем событие на сервер
+        });
+    </script>
+</body>
+</html>
